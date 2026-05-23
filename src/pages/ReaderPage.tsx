@@ -86,15 +86,7 @@ export default function ReaderPage() {
     }
   }, [])
 
-  // 流式更新时,若未被打断则跟到底
-  useEffect(() => {
-    if (gen.state.status !== 'generating') return
-    if (userInterruptedRef.current) return
-    const el = scrollRef.current
-    if (!el) return
-    programmaticScrollRef.current = true
-    el.scrollTo({ top: el.scrollHeight, behavior: 'auto' })
-  }, [gen.state.status, gen.state.streamingContent])
+  // 注:生成过程中不自动滚动,由用户自行控制阅读位置
 
   // 每次新一轮生成开始(content 还是空),重置打断标志
   useEffect(() => {
