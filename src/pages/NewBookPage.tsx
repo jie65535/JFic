@@ -65,7 +65,7 @@ export default function NewBookPage() {
     if (!file) return
     if (file.size > MAX_NOVEL_BYTES) {
       toast.error(
-        `原著文件不能超过 1MB（当前 ${(file.size / 1024 / 1024).toFixed(2)} MB），请精简后再上传。`,
+        `原著文件不能超过 2MB（当前 ${(file.size / 1024 / 1024).toFixed(2)} MB），请精简后再上传。`,
       )
       return
     }
@@ -76,7 +76,7 @@ export default function NewBookPage() {
     try {
       const text = await decodeFileSmart(file)
       if (byteSize(text) > MAX_NOVEL_BYTES * 1.05) {
-        toast.error('解码后内容超过 1MB 限额，请精简后再上传。')
+        toast.error('解码后内容超过 2MB 限额，请精简后再上传。')
         return
       }
       setNovelText(text)
@@ -382,7 +382,7 @@ function UploadStep({
       <div>
         <h2 className="text-xl font-semibold tracking-tight">第二步:上传原著</h2>
         <p className="mt-1 text-sm text-muted-foreground">
-          .txt 文件，限制 ≤ 1MB（约 30 万中文字）。自动检测编码。
+          .txt 文件，限制 ≤ 2MB（约 60 万中文字）。自动检测编码。
         </p>
       </div>
 
@@ -615,7 +615,7 @@ function Dropzone({
         <p className="text-sm font-medium">
           {dragOver ? '松开以上传' : '点击或拖拽 txt 文件到此处'}
         </p>
-        <p className="mt-1 text-xs text-muted-foreground">≤ 1MB · 自动识别编码</p>
+        <p className="mt-1 text-xs text-muted-foreground">≤ 2MB · 自动识别编码</p>
       </div>
     </div>
   )

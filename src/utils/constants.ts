@@ -1,5 +1,5 @@
 // ===== 文件与上下文上限 =====
-export const MAX_NOVEL_BYTES = 1 * 1024 * 1024 // 1MB
+export const MAX_NOVEL_BYTES = 2 * 1024 * 1024 // 2MB
 export const CONTEXT_WINDOW = 1_000_000
 export const CONTEXT_HARD_LIMIT = 980_000 // 拒绝新生成的阈值
 
