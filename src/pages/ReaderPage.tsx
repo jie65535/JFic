@@ -33,6 +33,8 @@ export default function ReaderPage() {
   // 用户是否手动打断了自动跟随(向上滚动)
   const userInterruptedRef = useRef(false)
   const touchStartYRef = useRef(0)
+  // 标记本次 scroll 事件来自程序化 scrollTo，不应重置打断标志
+  const programmaticScrollRef = useRef(false)
   // 首次加载时是否已根据 lastReadChapter 恢复过位置
   const didRestoreRef = useRef(false)
 
@@ -61,6 +63,10 @@ export default function ReaderPage() {
     }
     // 用户自己滚到底部,自动重新挂钩
     const onScroll = () => {
+      if (programmaticScrollRef.current) {
+        programmaticScrollRef.current = false
+        return
+      }
       if (!userInterruptedRef.current) return
       const distance = el.scrollHeight - el.scrollTop - el.clientHeight
       if (distance < 30) userInterruptedRef.current = false
@@ -86,6 +92,7 @@ export default function ReaderPage() {
     if (userInterruptedRef.current) return
     const el = scrollRef.current
     if (!el) return
+    programmaticScrollRef.current = true
     el.scrollTo({ top: el.scrollHeight, behavior: 'auto' })
   }, [gen.state.status, gen.state.streamingContent])
 
