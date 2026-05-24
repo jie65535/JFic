@@ -17,6 +17,8 @@ export interface Book {
   updatedAt: number
   /** 上次阅读到的章节序号,用于刷新后恢复滚动位置 */
   lastReadChapter?: number
+  /** 上次阅读到的段落在该章节内的索引(以 markdown 顶层块为单位:p/h1/ul/...) */
+  lastReadParagraph?: number
 }
 
 export interface Chapter {

@@ -41,9 +41,16 @@ export async function updateBook(id: string, patch: Partial<Book>): Promise<void
   await db.books.update(id, { ...patch, updatedAt: Date.now() })
 }
 
-/** 仅更新 lastReadChapter,不刷新 updatedAt(避免书架排序被频繁滚动扰动) */
-export async function saveReadingPosition(id: string, chapterNumber: number): Promise<void> {
-  await db.books.update(id, { lastReadChapter: chapterNumber })
+/** 仅更新阅读位置,不刷新 updatedAt(避免书架排序被频繁滚动扰动) */
+export async function saveReadingPosition(
+  id: string,
+  chapterNumber: number,
+  paragraph: number,
+): Promise<void> {
+  await db.books.update(id, {
+    lastReadChapter: chapterNumber,
+    lastReadParagraph: Math.max(0, Math.round(paragraph)),
+  })
 }
 
 export async function deleteBook(id: string): Promise<void> {

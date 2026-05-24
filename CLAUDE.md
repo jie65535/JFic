@@ -97,11 +97,27 @@ Don't replace the heuristic with a tokenizer library — it's intentionally chea
 
 `src/utils/api.ts::streamChat()` uses `fetch` + `ReadableStream` + `AbortController`. Partial output is preserved if the user aborts (the chapter is written to IndexedDB with whatever content was streamed). The `usage` field arrives in the final SSE chunk when `stream_options.include_usage` is set — we already pass that.
 
-### 8. Auto-scroll is interruption-based, not position-based
+### 8. No auto-scroll during streaming
 
-`pages/ReaderPage.tsx` tracks an "interrupted" ref. It is flipped to `true` when the user generates an input event signaling "I want to scroll up" (`wheel` with deltaY<0, `touchmove` downward, `PageUp` / `Home` / `ArrowUp`). It is flipped back to `false` when the user scrolls back near the bottom (< 30px) or a new generation starts. The auto-scroll effect respects this ref.
+The reader does **not** programmatically scroll during generation. The user controls reading position; new tokens stream into the active chapter card below the fold without the viewport moving. Don't reintroduce follow-the-bottom auto-scroll — mobile direction detection was unreliable and reading speed can't keep up with generation anyway.
 
-Do not switch back to a pure-position-based check — programmatic `scrollTo` and content growth both make naive position detection flicker.
+### 9. Streaming chapter and DB chapter share one ChapterCard
+
+`ReaderPage.tsx::renderedChapters` synthesizes a `virtualChapter` (id=`streaming-N`) from `gen.state.streamingContent` and appends it to `chapters` while generation is in flight. The map keys cards by `chapter.number` (not `chapter.id`), so when `useLiveQuery` finally syncs the real chapter, React reuses the same `ChapterCard` instance and DOM node — only `streaming` flips false. This keeps the browser's scroll anchoring stable across the streaming→idle transition; switching between different components (the old `StreamingCard` + `ChapterCard` design) caused the viewport to jump.
+
+`useGeneration` cooperates: on completion it keeps `streamingNumber` and `streamingContent = finalText` set until the next render observes the real chapter in `chapters`, so the `virtualChapter` placeholder doesn't disappear before its replacement arrives.
+
+### 10. ChapterCard lazy mount, anchored by activeNumber
+
+Only chapters within `activeNumber ± 2` (plus the last chapter) render their markdown; the rest are placeholders with `minHeight = estimateHeight(chars)`. The estimate is **deliberately low** so that when a card flips from placeholder to real markdown the document can only grow — never shrink. A shrink would let `scrollTop` get clamped to `maxScroll`, visibly jumping the viewport.
+
+Once a card has rendered it never unmounts, even if the user scrolls far away (the paragraph anchor for `lastReadParagraph` depends on the DOM being there).
+
+### 11. Reading position is (chapter, paragraph-index)
+
+`Book.lastReadChapter` + `Book.lastReadParagraph` (index into `.prose-chapter > children`, i.e. markdown top-level blocks: `p`/`h1`/`ul`/...). Saved on every scroll (debounced 600ms) from the scroll handler — not from a React effect, since the paragraph index lives in a local variable inside `compute()` and wouldn't trigger deps. Restore is two-step: `scrollIntoView` the chapter to let the scroll handler advance `activeNumber` and unfreeze the lazy card, then `setTimeout(120)` and `scrollIntoView` the paragraph.
+
+Pixel offsets would be unstable across viewport width / font-size changes; paragraph indices are stable because chapter content is immutable (regenerate truncates, never edits in place).
 
 ## Style and conventions
 

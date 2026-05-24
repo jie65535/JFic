@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { ArrowLeft, Menu } from 'lucide-react'
 import { toast } from 'sonner'
+import type { Chapter } from '@/db/types'
 import { useBook, saveReadingPosition } from '@/hooks/useBooks'
 import { useChapters } from '@/hooks/useChapters'
 import { useConfig, isConfigValid } from '@/hooks/useConfig'
@@ -10,11 +11,11 @@ import { Button } from '@/components/ui/button'
 import { Drawer, DrawerContent } from '@/components/ui/drawer'
 import { ReaderSidebar } from '@/components/reader/Sidebar'
 import { ChapterCard } from '@/components/reader/ChapterCard'
-import { StreamingCard } from '@/components/reader/StreamingCard'
 import { EmptyState } from '@/components/reader/EmptyState'
 import { BottomBar } from '@/components/reader/BottomBar'
 import { BookCover } from '@/components/reader/BookCover'
 import { exportChaptersAsTxt } from '@/utils/export'
+import { extractChapterTitle } from '@/utils/title'
 
 export default function ReaderPage() {
   const { id } = useParams<{ id: string }>()
@@ -30,99 +31,83 @@ export default function ReaderPage() {
   const [activeNumber, setActiveNumber] = useState<number | null>(null)
 
   const scrollRef = useRef<HTMLDivElement | null>(null)
-  // 用户是否手动打断了自动跟随(向上滚动)
-  const userInterruptedRef = useRef(false)
-  const touchStartYRef = useRef(0)
-  // 标记本次 scroll 事件来自程序化 scrollTo，不应重置打断标志
-  const programmaticScrollRef = useRef(false)
-  // 首次加载时是否已根据 lastReadChapter 恢复过位置
   const didRestoreRef = useRef(false)
 
-  // === 自动滚动跟随:基于用户输入事件判定意图,避免被程序化滚动反向影响 ===
+  // 滚动驱动:活跃章节 + 章内段落索引,顺便 debounce 写库。
+  // 段落锚点比像素偏移稳定:跨设备宽度变化、字号调整都不会偏。
+  // 保存也放在 scroll handler 里,因为段落索引是局部变量而不是 React state,
+  // 不能靠 useEffect deps 触发写库,否则同一章内滚动不会保存。
+  const bookId = book?.id
   useEffect(() => {
     const el = scrollRef.current
-    if (!el) return
+    if (!el || !bookId) return
 
-    const interrupt = () => {
-      userInterruptedRef.current = true
+    let raf = 0
+    let saveTimer: number | null = null
+
+    const scheduleSave = (num: number, paragraph: number) => {
+      if (!didRestoreRef.current) return
+      if (saveTimer) clearTimeout(saveTimer)
+      saveTimer = window.setTimeout(() => {
+        void saveReadingPosition(bookId, num, paragraph)
+      }, 600)
     }
-    const onWheel = (e: WheelEvent) => {
-      if (e.deltaY < 0) interrupt()
-    }
-    const onTouchStart = (e: TouchEvent) => {
-      touchStartYRef.current = e.touches[0]?.clientY ?? 0
-    }
-    const onTouchMove = (e: TouchEvent) => {
-      const start = touchStartYRef.current
-      const cur = e.touches[0]?.clientY ?? start
-      // 手指向下拖动 = 内容向上滚 = 想往回读
-      if (cur - start > 8) interrupt()
-    }
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (['ArrowUp', 'PageUp', 'Home'].includes(e.key)) interrupt()
-    }
-    // 用户自己滚到底部,自动重新挂钩
-    const onScroll = () => {
-      if (programmaticScrollRef.current) {
-        programmaticScrollRef.current = false
+
+    const compute = () => {
+      raf = 0
+      const cards = el.querySelectorAll<HTMLElement>('[data-chapter-number]')
+      if (cards.length === 0) {
+        setActiveNumber(null)
         return
       }
-      if (!userInterruptedRef.current) return
-      const distance = el.scrollHeight - el.scrollTop - el.clientHeight
-      if (distance < 30) userInterruptedRef.current = false
+      const containerRect = el.getBoundingClientRect()
+      const probe = el.scrollTop + 80
+
+      let activeEl: HTMLElement | null = null
+      for (const card of cards) {
+        const top = card.getBoundingClientRect().top - containerRect.top + el.scrollTop
+        if (top <= probe) activeEl = card
+        else break
+      }
+      if (!activeEl) activeEl = cards[0]
+
+      const num = Number(activeEl.dataset.chapterNumber)
+      if (Number.isNaN(num)) return
+
+      let paragraphIdx = 0
+      const proseEl = activeEl.querySelector('.prose-chapter') as HTMLElement | null
+      if (proseEl) {
+        const blocks = proseEl.children
+        for (let i = 0; i < blocks.length; i++) {
+          const block = blocks[i] as HTMLElement
+          const top = block.getBoundingClientRect().top - containerRect.top + el.scrollTop
+          if (top <= probe) paragraphIdx = i
+          else break
+        }
+      }
+
+      setActiveNumber(num)
+      scheduleSave(num, paragraphIdx)
     }
 
-    el.addEventListener('wheel', onWheel, { passive: true })
-    el.addEventListener('touchstart', onTouchStart, { passive: true })
-    el.addEventListener('touchmove', onTouchMove, { passive: true })
-    el.addEventListener('keydown', onKeyDown)
+    const onScroll = () => {
+      if (raf) return
+      raf = requestAnimationFrame(compute)
+    }
+
+    // 首次主动算一次,否则没滚动 activeNumber 一直为 null
+    compute()
     el.addEventListener('scroll', onScroll, { passive: true })
     return () => {
-      el.removeEventListener('wheel', onWheel)
-      el.removeEventListener('touchstart', onTouchStart)
-      el.removeEventListener('touchmove', onTouchMove)
-      el.removeEventListener('keydown', onKeyDown)
       el.removeEventListener('scroll', onScroll)
+      if (raf) cancelAnimationFrame(raf)
+      if (saveTimer) clearTimeout(saveTimer)
     }
-  }, [])
+  }, [bookId, chapters.length, gen.state.status])
 
-  // 注:生成过程中不自动滚动,由用户自行控制阅读位置
-
-  // 每次新一轮生成开始(content 还是空),重置打断标志
-  useEffect(() => {
-    if (gen.state.status === 'generating' && gen.state.streamingContent === '') {
-      userInterruptedRef.current = false
-    }
-  }, [gen.state.status, gen.state.streamingContent])
-
-  // === IntersectionObserver: 跟踪当前可见章节 ===
-  useEffect(() => {
-    const el = scrollRef.current
-    if (!el) return
-    const cards = el.querySelectorAll<HTMLElement>('[data-chapter-number]')
-    if (cards.length === 0) {
-      setActiveNumber(null)
-      return
-    }
-    const observer = new IntersectionObserver(
-      (entries) => {
-        const visible = entries
-          .filter((e) => e.isIntersecting)
-          .sort((a, b) => b.intersectionRatio - a.intersectionRatio)
-        if (visible[0]) {
-          const num = Number(
-            (visible[0].target as HTMLElement).dataset.chapterNumber,
-          )
-          if (!Number.isNaN(num)) setActiveNumber(num)
-        }
-      },
-      { root: el, threshold: [0.1, 0.5] },
-    )
-    cards.forEach((c) => observer.observe(c))
-    return () => observer.disconnect()
-  }, [chapters.length, gen.state.status])
-
-  // === 阅读位置恢复:首次章节加载完后,跳到 lastReadChapter ===
+  // 阅读位置恢复:目标章节可能是 lazy placeholder,先滚到章节顶让 scroll handler
+  // 推进 activeNumber → 触发 ChapterCard 翻面挂载 markdown,等下一帧 layout 完成
+  // 再跳到具体段落。
   useEffect(() => {
     if (didRestoreRef.current) return
     if (!book || chapters.length === 0) return
@@ -131,28 +116,23 @@ export default function ReaderPage() {
       didRestoreRef.current = true
       return
     }
-    // 等一帧让 DOM 渲染出来
+    const paragraphIdx = book.lastReadParagraph ?? 0
+    didRestoreRef.current = true
+
     requestAnimationFrame(() => {
       const node = document.getElementById(`chapter-${target}`)
-      if (node) {
-        node.scrollIntoView({ block: 'start' })
-      }
-      didRestoreRef.current = true
+      if (!node) return
+      node.scrollIntoView({ block: 'start' })
+      setTimeout(() => {
+        const proseEl = node.querySelector('.prose-chapter') as HTMLElement | null
+        const block = proseEl?.children[paragraphIdx] as HTMLElement | undefined
+        if (block) block.scrollIntoView({ block: 'start' })
+      }, 120)
     })
   }, [book, chapters.length])
 
-  // === 阅读位置保存:activeNumber 变化时 debounce 写库 ===
-  useEffect(() => {
-    if (!book || activeNumber == null) return
-    if (!didRestoreRef.current) return // 还没恢复完别覆盖
-    if (book.lastReadChapter === activeNumber) return
-    const t = setTimeout(() => {
-      void saveReadingPosition(book.id, activeNumber)
-    }, 800)
-    return () => clearTimeout(t)
-  }, [activeNumber, book])
-
-  // === 自动续写:检测用户滚到最后一章 → 自动触发 ===
+  // 用户阅读到最新章时就提前触发生成,这样读完末章新章节已经在;否则等读到底
+  // 部再触发用户要干等几十秒。
   const lastChapterNumber = chapters[chapters.length - 1]?.number ?? 0
   const isAtLastChapter = activeNumber !== null && activeNumber === lastChapterNumber
   const isIdle = gen.state.status === 'idle'
@@ -193,7 +173,7 @@ export default function ReaderPage() {
     if (v) setAutoMode(false)
   }, [])
 
-  // === 提交续写,通过预检后才清空输入框,避免配置不通过时丢失用户输入 ===
+  // 通过预检后才清输入框,避免配置不通过时丢失用户输入
   const handleSubmit = useCallback(() => {
     if (!book) return
     if (!isConfigValid(config)) {
@@ -203,7 +183,6 @@ export default function ReaderPage() {
     if (gen.state.status === 'generating') return
     const idea = creativeIdea
     setCreativeIdea('')
-    userInterruptedRef.current = false
     void gen.generate(idea)
   }, [book, config, creativeIdea, gen])
 
@@ -217,7 +196,6 @@ export default function ReaderPage() {
       const ch = chapters.find((c) => c.number === number)
       const idea = creativeIdea.trim() || ch?.creativeIdea || ''
       setCreativeIdea('')
-      userInterruptedRef.current = false
       await gen.regenerate(number, idea)
     },
     [chapters, config, creativeIdea, gen],
@@ -243,6 +221,37 @@ export default function ReaderPage() {
 
   const isGenerating = gen.state.status === 'generating'
   const isFull = gen.state.status === 'full'
+
+  // 把流式中的"虚拟章节"合并进 chapters,与 DB 章节共用 ChapterCard 渲染。
+  // 生成完成时 React 通过 key=number 复用同一个 DOM 节点,只是 streaming prop
+  // 翻面,浏览器 scroll anchoring 能稳住视口;否则切换不同组件会让视口跳变。
+  const renderedChapters = useMemo<Chapter[]>(() => {
+    const sNum = gen.state.streamingNumber
+    if (sNum == null) return chapters
+    if (chapters.some((c) => c.number === sNum)) return chapters
+    if (!book) return chapters
+    const sContent = gen.state.streamingContent
+    const virtual: Chapter = {
+      id: `streaming-${sNum}`,
+      bookId: book.id,
+      number: sNum,
+      title: extractChapterTitle(sContent, sNum),
+      content: sContent,
+      creativeIdea: gen.state.streamingCreativeIdea,
+      promptTokens: 0,
+      completionTokens: 0,
+      cacheHitTokens: 0,
+      cacheMissTokens: 0,
+      createdAt: Date.now(),
+    }
+    return [...chapters, virtual]
+  }, [
+    chapters,
+    gen.state.streamingNumber,
+    gen.state.streamingContent,
+    gen.state.streamingCreativeIdea,
+    book,
+  ])
 
   const sidebarProps = useMemo(
     () =>
@@ -312,26 +321,34 @@ export default function ReaderPage() {
           <div className="mx-auto max-w-3xl px-4 py-6 sm:px-6 sm:py-10 space-y-6">
             <BookCover book={book} chapters={chapters} />
 
-            {chapters.length === 0 && !isGenerating && <EmptyState />}
+            {renderedChapters.length === 0 && !isGenerating && <EmptyState />}
 
-            {chapters.map((c, idx) => (
-              <ChapterCard
-                key={c.id}
-                chapter={c}
-                trailingCount={chapters.length - 1 - idx}
-                onRegenerate={handleRegenerate}
-                disabled={isGenerating}
-              />
-            ))}
-
-            {isGenerating && gen.state.streamingNumber && (
-              <StreamingCard
-                number={gen.state.streamingNumber}
-                content={gen.state.streamingContent}
-                creativeIdea={gen.state.streamingCreativeIdea}
-                onAbort={gen.abort}
-              />
-            )}
+            {renderedChapters.map((c, idx) => {
+              const isLast = idx === renderedChapters.length - 1
+              const isStreamingChapter =
+                c.number === gen.state.streamingNumber && isGenerating
+              // 末章必须真实渲染:流式中的章节是末章,placeholder 偏矮会让生成完成
+              // 那一帧文档高度突减,scrollTop 被 clamp 到底
+              const anchor = activeNumber ?? renderedChapters[0]?.number ?? 0
+              const isNear = Math.abs(c.number - anchor) <= 2
+              return (
+                <ChapterCard
+                  // key=number: virtualChapter 和 DB 真章节复用同一 ChapterCard
+                  // 实例 / DOM 节点,生成完成时不引起组件卸载
+                  key={c.number}
+                  chapter={c}
+                  trailingCount={renderedChapters.length - 1 - idx}
+                  onRegenerate={handleRegenerate}
+                  disabled={isGenerating}
+                  lazy={!isLast && !isNear}
+                  streaming={isStreamingChapter}
+                  onAbort={isStreamingChapter ? gen.abort : undefined}
+                  streamingCreativeIdea={
+                    isStreamingChapter ? gen.state.streamingCreativeIdea : undefined
+                  }
+                />
+              )
+            })}
 
             {isFull && (
               <div className="rounded-2xl border border-red-500/40 bg-red-500/5 p-4 text-sm text-red-600 dark:text-red-400">
