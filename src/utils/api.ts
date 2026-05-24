@@ -65,7 +65,7 @@ export async function streamChat(opts: {
         messages,
         stream: true,
         stream_options: { include_usage: true },
-        temperature: opts.temperature ?? 0.85,
+        temperature: opts.temperature ?? 1.5,
       }),
     })
   } catch (err) {
