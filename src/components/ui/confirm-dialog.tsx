@@ -43,9 +43,9 @@ export function ConfirmDialog({
           </Button>
           <Button
             variant={variant === 'destructive' ? 'destructive' : 'default'}
-            onClick={async () => {
-              await onConfirm()
+            onClick={() => {
               onOpenChange(false)
+              void onConfirm()
             }}
           >
             {confirmText}
