@@ -6,6 +6,10 @@ export interface Config {
   apiKey: string
   model: string
   theme: ThemePref
+  /** DeepSeek 思考模式开关。关闭后直接出文，可能更"听话"但准确性下降 */
+  thinking: boolean
+  /** 思考强度，仅在 thinking=true 时生效。high 是服务端默认，max 让模型思考更久 */
+  reasoningEffort: 'high' | 'max'
 }
 
 export interface Book {

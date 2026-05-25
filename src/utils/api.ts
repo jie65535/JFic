@@ -46,10 +46,26 @@ export async function streamChat(opts: {
   messages: ChatMessage[]
   signal: AbortSignal
   onDelta: (delta: string) => void
-  temperature?: number
+  /** DeepSeek 思考模式开关。undefined 时不下发字段(用服务端默认) */
+  thinking?: boolean
+  /** 思考强度，仅当 thinking 启用时下发 */
+  reasoningEffort?: 'high' | 'max'
 }): Promise<StreamResult> {
   const { config, messages, signal, onDelta } = opts
   const url = `${normalizeBaseUrl(config.baseUrl)}/v1/chat/completions`
+
+  const body: Record<string, unknown> = {
+    model: config.model,
+    messages,
+    stream: true,
+    stream_options: { include_usage: true },
+  }
+  if (opts.thinking !== undefined) {
+    body.thinking = { type: opts.thinking ? 'enabled' : 'disabled' }
+  }
+  if (opts.thinking && opts.reasoningEffort) {
+    body.reasoning_effort = opts.reasoningEffort
+  }
 
   let resp: Response
   try {
@@ -60,13 +76,7 @@ export async function streamChat(opts: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${config.apiKey}`,
       },
-      body: JSON.stringify({
-        model: config.model,
-        messages,
-        stream: true,
-        stream_options: { include_usage: true },
-        temperature: opts.temperature ?? 1.5,
-      }),
+      body: JSON.stringify(body),
     })
   } catch (err) {
     if ((err as Error).name === 'AbortError') {

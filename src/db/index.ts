@@ -30,6 +30,8 @@ export async function saveConfig(patch: Partial<Omit<Config, 'id'>>): Promise<vo
     apiKey: '',
     model: 'deepseek-v4-pro',
     theme: 'system',
+    thinking: true,
+    reasoningEffort: 'high',
     ...cur,
     ...patch,
   }

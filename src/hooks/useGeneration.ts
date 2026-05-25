@@ -126,6 +126,8 @@ export function useGeneration(opts: {
           config,
           messages,
           signal: ctrl.signal,
+          thinking: config.thinking,
+          reasoningEffort: config.reasoningEffort,
           onDelta: (d) => {
             setState((s) =>
               s.status === 'generating'
