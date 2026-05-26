@@ -61,3 +61,14 @@ export async function truncateChapters(bookId: string, fromNumber: number): Prom
     await db.books.update(bookId, { updatedAt: Date.now() })
   })
 }
+
+/** 把被 truncate 的章节回写回去(用于重新生成失败时回滚) */
+export async function restoreChapters(bookId: string, chapters: Chapter[]): Promise<void> {
+  if (chapters.length === 0) return
+  await db.transaction('rw', db.chapters, db.books, async () => {
+    // 旧 id 留着可能与新生成的冲突;反正没有外部引用,统一发新 id
+    const fresh = chapters.map((c) => ({ ...c, id: nanoid(10) }))
+    await db.chapters.bulkAdd(fresh)
+    await db.books.update(bookId, { updatedAt: Date.now() })
+  })
+}

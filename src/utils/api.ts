@@ -123,6 +123,12 @@ export async function streamChat(opts: {
         }
         try {
           const json = JSON.parse(payload)
+          // OpenAI/DeepSeek 在流中报错时会塞一个 error 对象进来,HTTP 仍是 200。
+          // 不识别这个就会看起来"调用成功但啥都没生成",卡片消失而无任何提示。
+          if (json?.error) {
+            const errMsg = json.error.message || JSON.stringify(json.error)
+            throw new ApiError(`服务端错误：${errMsg}`)
+          }
           const delta: string | undefined = json?.choices?.[0]?.delta?.content
           if (delta) {
             text += delta
@@ -132,8 +138,9 @@ export async function streamChat(opts: {
           if (json?.usage) {
             usage = parseUsage(json.usage)
           }
-        } catch {
-          // 忽略无法解析的行
+        } catch (e) {
+          if (e instanceof ApiError) throw e
+          // JSON 解析失败的行直接忽略
         }
       }
     }

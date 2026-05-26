@@ -183,7 +183,13 @@ export default function ReaderPage() {
     if (gen.state.status === 'generating') return
     const idea = creativeIdea
     setCreativeIdea('')
-    void gen.generate(idea)
+    void gen.generate(idea).then((r) => {
+      // 失败时把刚清空的提示词还回去,用户直接点续写即可重试;若用户在等待过程
+      // 中又敲了新内容,以新内容为准,不覆盖
+      if (r === 'error' || r === 'full') {
+        setCreativeIdea((cur) => cur || idea)
+      }
+    })
   }, [book, config, creativeIdea, gen])
 
   const handleRegenerate = useCallback(
@@ -194,9 +200,13 @@ export default function ReaderPage() {
       }
       if (gen.state.status === 'generating') return
       const ch = chapters.find((c) => c.number === number)
-      const idea = creativeIdea.trim() || ch?.creativeIdea || ''
-      setCreativeIdea('')
-      await gen.regenerate(number, idea)
+      const typed = creativeIdea
+      const idea = typed.trim() || ch?.creativeIdea || ''
+      if (typed.trim()) setCreativeIdea('')
+      const r = await gen.regenerate(number, idea)
+      if ((r === 'error' || r === 'full') && typed.trim()) {
+        setCreativeIdea((cur) => cur || typed)
+      }
     },
     [chapters, config, creativeIdea, gen],
   )
